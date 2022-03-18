@@ -10,8 +10,10 @@ editor_options:
 ---
 
 <!-- Updates March, 2022 -->
-<!-- Great inputs from Denis Shah -->
-<!-- Added most relevant package references (indicated by ::) explicit, so that you know which package a function comes from  -->
+<!-- We appreciate the inputs from Dr. Denis Shah -->
+<!-- Added package references (indicated by ::), so that you know which package a function comes from  -->
+<!-- Replaced some deprecated functions -->
+<!-- Day length variable added within the NASAPOWER function -->
 
 <!-- NOTE: Last run on "R version 4.1.3 (03-18-2022)"-->
 
