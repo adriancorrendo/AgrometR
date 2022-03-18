@@ -1,18 +1,19 @@
 ---
 title: "Retrieving and processing agrometeorological data from API-client sources using R software"
-author: "Adrian A. Correndo, Luiz H. Moro Rosso & Ignacio A. Ciampitti"
-affiliation: "Department of Agronomy, Kansas State University, Manhattan, KS-66506"
-date: "03/17/2021"
-contact: "correndo@ksu.edu; lhmrosso@ksu.edu; ciampitti@ksu.edu."
+author: "Adrian A. Correndo (1), Luiz H. Moro Rosso (1), Denis Shah (2) & Ignacio A. Ciampitti (1)"
+affiliation: "1. Department of Agronomy || 2. Department of Plant Pathology, Kansas State University, Manhattan, KS-66506"
+date: "03/18/2021"
+contact: "correndo@ksu.edu"
 citation: " Correndo, A.A., Moro Rosso, L.H. & Ciampitti, I.A. Retrieving and processing agro-meteorological data from API-client sources using R software. BMC Res Notes 14, 205 (2021). https://doi.org/10.1186/s13104-021-05622-8 OR Correndo, Adrian A.; Moro Rosso, Luiz H.; Ciampitti, Ignacio A., 2021, 'Agrometeorological data using R-software', https://doi.org/10.7910/DVN/J9EUZU, Harvard Dataverse, V6 "
 editor_options: 
   chunk_output_type: console
 ---
 
 <!-- Updates March, 2022 -->
+<!-- Great inputs from Denis Shah -->
 <!-- Added most relevant package references (indicated by ::) explicit, so that you know which package a function comes from  -->
 
-<!-- NOTE: Last run on "R version 4.1.2 (03-18-2022)"-->
+<!-- NOTE: Last run on "R version 4.1.3 (03-18-2022)"-->
 
 \newpage
 
