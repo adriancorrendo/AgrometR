@@ -1,0 +1,1059 @@
+---
+title: "Retrieving and processing agrometeorological data from API-client sources using R software"
+author: "Adrian A. Correndo (1), Luiz H. Moro Rosso (1), Denis Shah (2) & Ignacio A. Ciampitti (1)"
+affiliation: "1. Department of Agronomy || 2. Department of Plant Pathology, Kansas State University, Manhattan, KS-66506"
+date: "03/18/2021"
+contact: "correndo@ksu.edu"
+citation: " Correndo, A.A., Moro Rosso, L.H. & Ciampitti, I.A. Retrieving and processing agro-meteorological data from API-client sources using R software. BMC Res Notes 14, 205 (2021). https://doi.org/10.1186/s13104-021-05622-8 OR Correndo, Adrian A.; Moro Rosso, Luiz H.; Ciampitti, Ignacio A., 2021, 'Agrometeorological data using R-software', https://doi.org/10.7910/DVN/J9EUZU, Harvard Dataverse, V6 "
+editor_options: 
+  chunk_output_type: console
+---
+
+<!-- Updates March, 2022 -->
+<!-- We appreciate the inputs from Dr. Denis Shah -->
+<!-- Added package references (indicated by ::), so that you know which package a function comes from  -->
+<!-- Replaced some deprecated functions -->
+<!-- Day length variable added within the NASAPOWER function -->
+
+<!-- NOTE: Last run on "R version 4.1.3 (03-18-2022)"-->
+
+\newpage
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(message = FALSE, warning = FALSE)
+```
+
+During the tutorial: i) we provide lines of code showing how to download daily-weather data (**Section 2**), and ii) we offer the option to generate new variables and summaries for different time intervals or periods either historical or during the cropping season (**Sections 3 to 5**). <br/>
+
+This code was generated using R version 4.0.3 (Linux-GNU, 64-bit) and R-studio v1.2.5042. Original file is R Markdown (*rmd) with code in chunks. <br/>
+
+\newpage
+
+## Necessary Libraries
+
+```{r Load-Packages}
+library(easypackages) # Assists on loading packages and installing them if they are not
+packages('tidyverse') # Data wrangling
+packages('lubridate') # Dates operations
+packages('kableExtra') # Table formatting
+packages('daymetr','chirps','nasapower') # Weather databases
+packages('vegan') # Shannon Diversity Index
+packages('skimr') # For checking weather data after sourcing
+
+```
+
+## Input example
+
+### Creating within R
+
+In the next chunk we create a data-table with the required formats. Please, note that we use YYYY_MM_DD format, using "_" as separator to avoid format conflicts if data is generated in Spreadsheet software such as Excel, LibreCalc, or similar. Data will be later transformed to Date-format during the code. <br/>
+
+The user could use either the provided example, or he/she might use it as a template to fill it out with pertinent data. Each row will represent a unique site/location, and key metadata such as lat-lon coordinates, and key dates will be represented by columns. At the very least, user must provide "Start" and "End" dates.
+
+```{r Create-Coordinate-Tables}
+# Coordinates of each site (site names must be unique)
+# Each site is a row
+# Date for each site in columns
+df.site <- data.frame(ID = c('1', '2', '3'),
+                      Crop = c('Corn', 'Wheat', 'Soy'),
+                      Site = c('Scandia', 'Belleville', 'Ottawa'),
+                      # Both coordinates in decimal format
+                      latitude = c(39.8291, 39.8158, 38.5398),
+                      longitude = c(-97.8458, -97.6720, -95.2446))
+
+# Specify key dates. Typically, dates relate to phenological stages
+# Each date must be a column
+df.time <- data.frame(ID = c('1', '2', '3'),
+                      # Dates as YYYY_MM_DD, using "_" to separate
+                      Start = c('2002_04_25', '2005_10_15', '2010_05_20'),
+                      Flo = c('2002_07_15', '2006_04_15', '2010_07_05'),
+                      SeFi =c('2002_08_15', '2006_05_01', '2010_08_15'),
+                      End = c('2002_09_30', '2006_06_20', '2010_10_10'))
+
+# For historical data
+df.historical <- data.frame(ID = c('1', '2', '3'),
+                      # Dates as YYYY_MM_DD, using "_" to separate
+                      Start = c('2000_01_01', '2000_01_01', '2000_01_01'),
+                      End = c('2019_12_31', '2019_12_31', '2019_12_31'))
+
+# Merging sites and dates
+
+# Option 1. Seasonal weather data
+df.input <- df.site %>% dplyr::left_join(df.time, by = "ID")
+
+# Option 2. Historical weather data
+df.historical <- df.site %>% dplyr::left_join(df.historical, by = "ID")
+```
+
+
+### Creating a `.csv` template
+
+Here we export the example tables to "csv" format to use as templates
+
+```{r Export-to-csv-or-Excel}
+write.csv(df.input, 'Example_input.csv', row.names = FALSE, na = '')
+write.csv(df.historical, 'Example_input_historical.csv', row.names = FALSE, na = '')
+
+```
+
+
+### Importing a `.csv` file
+
+Here we import your table from the csv file, and show how input tables should look like right after importing:
+
+#### Seasonal
+```{r Import-csv-Seasonal}
+# Current directory or any path:
+path <- paste0(getwd(), '/') 
+# Place your file in the current working directory (getwd)
+
+# Seasonal data input
+file_input <- paste0(path, 'Example_input.csv') # Change to your file
+
+# Open seasonal file
+df.input <- 
+  read.table(file_input, sep = ',', header = TRUE) %>%
+  # DS: mutate_at has been superseded. Use across()...
+  # dplyr::mutate_at(vars(6:ncol(.)), ~as.Date(., format = '%Y_%m_%d'))
+  dplyr::mutate(across(6:ncol(.), ~as.Date(., format = '%Y_%m_%d')))
+
+# View Seasonal
+kable(df.input) %>% 
+  kable_styling(latex_options = c("striped"), position = "center", font_size = 10)
+```
+
+
+#### Historical
+```{r Import-csv-Historical}
+# Current directory or any path:
+path <- paste0(getwd(), '/') 
+# Place your file in the current working directory (getwd)
+
+# Historical data input
+file_historical <- paste0(path, 'Example_input_historical.csv') # Change to your file
+
+# Open historical file
+df.historical <- 
+  read.table(file_historical, sep=',', header = TRUE) %>% 
+  # mutate_at(vars(6:ncol(.)), ~as.Date(., format='%Y_%m_%d'))
+  dplyr::mutate(across(6:ncol(.), ~as.Date(., format = '%Y_%m_%d')))
+
+# View Historical
+kable(df.historical) %>% 
+  kable_styling(latex_options = c("striped"), position = "center", font_size = 10)
+```
+
+
+\newpage
+
+# RETRIEVING & PROCESSING DATA
+
+During the next chunks of code we will retrieve and process the weather data from the above-mentioned sources. <br/>
+
+**Starting dates** <br/>
+
+If the user is interested in weather of periods PRIOR to planting, he/she can define the number of Days Prior Planting (dpp) inside each "weather.source" function. By default, dpp = 0. <br/>
+
+<!-- DS: in our case for FHB, we are interested in the number of days prior to anthesis, which is what dpp would be in this case. Could rename to dpf = days prior to flowering -->
+
+**Historical weather** <br/>
+
+If the user is interested in retrieving weather from multiple years at each location, there are two main options: i) define the years as "rows" of the input data table with Start and End dates as Jan 1$^{\text{st}}$ and Dec 31$^{\text{st}}$, respectively; or ii) define the Start date of the initial year, and End date of the final year of the series. <br/>
+
+The example here includes a separate input for historical weather (df.historical). <br/>
+
+**Extra variables** <br/>
+<!-- DS: this would be of interest, i.e., feature engineering, within an agronomic context -->
+
+Neither of the databases provide data on reference evapotranspiration ($\text{ET}_0$). However, using DAYMET and NASA-POWER, it is possible to estimate $\text{ET}_0$ using the Hargreaves and Samani approach, which only requires temperature information (Hargreaves and Samani, 1985; Raziei and Pereira, 2013). However, the $\text{ET}_{0-HS}$ equation is reported to give unreliable estimates for daily $ET0$ and therefore it should be used for 10-day periods at the shortest (Cobaner et al., 2017). Check Tutorial file. <br/>
+
+```{r Define-constants-for-ET0}
+# Constants for ET0 (Cobaner et al., 2017)
+# Solar constant:
+Gsc <- 0.0820 # (MJ m-2 min-1)
+# Radiation adjustment coefficient (Samani, 2004)
+kRs <- 0.17
+```
+
+\newpage
+
+## DAYMET function
+
+Here we download the daily-weather data from the DAYMET database, and we process it to obtain common variables of agronomic value.
+ <br/>
+ 
+WARNING: "The daymet calendar is based on a standard calendar year. All Daymet years have 1 - 365 days, including leap years. For leap years, the Daymet database includes leap day. Values for December 31 are discarded from leap years to maintain a 365-day year. This is a property of daymet to be aware of when summarizing".
+
+```{r DAYMET-function}
+# Function
+# DS: you can customize this for FHB.  
+
+weather.daymet <- function(input, dpp = 0){ 
+  # Downloads the daily weather data from the DAYMET database and process it
+  # Args:
+  #  input = input file containing the locations and the start & end dates for the time series
+  #  dpp = days prior to the Start
+  # Returns:
+  #  a tibble of DAYMET weather variables for the requested time period
+  input %>%
+    dplyr::mutate(
+      Weather = purrr::pmap(list(ID = ID,
+                                 lat = latitude,
+                                 lon = longitude,
+                                 sta = Start - dpp,
+                                 end = End),
+                                        
+                            # Retrieving daymet data:
+                            function(ID, lat, lon, sta, end) {
+                              daymetr::download_daymet(site = ID,
+                                                       lat = lat, 
+                                                       lon = lon,
+                                                       # Extracting year:
+                                                       start = as.numeric(substr(sta, 1, 4)),
+                                                       end = as.numeric(substr(end, 1, 4)),
+                                                       internal = TRUE, 
+                                                       simplify = TRUE)})) %>% 
+    
+    # Organizing dataframe (Re-arranging rows and columns)
+    dplyr::mutate(Weather = Weather %>% 
+                    # Adjusting dates format:
+                    purrr::map(~ dplyr::mutate(., 
+                                               Date = as.Date(as.numeric(yday) - 1, # Day of the year
+                                                              origin = paste0(year, '-01-01')),
+                                               Year = year(Date),
+                                               Month = month(Date),
+                                               Day = mday(Date))) %>% 
+                    purrr::map(~ dplyr::select(., yday, Year, Month, Day, Date, measurement, value)) %>%
+                    # NOTE: spread has been superseded. Use pivot_wider:
+                    # purrr::map(~ spread(., 'measurement', 'value'))  %>% 
+                    purrr::map(~ tidyr::pivot_wider(., names_from = measurement, values_from = value)) %>%
+                    # Renaming variables:
+                    # NOTE: rename_all() has been superseded by rename_with()
+                    purrr::map(~ rename_with(., ~c(
+                      "DOY",   # Date as Day of the year
+                      "Year",  # Year
+                      "Month", # Month 
+                      "Day",   # Day of the month
+                      "Date",  # Date as normal format
+                      "DL",    # Day length (sec)
+                      "PP",    # Precipitation (mm)
+                      "Rad",   # Radiation (W/m2)
+                      "SWE",   # Snow water (kg/m2)
+                      "Tmax",  # Max. temp. (degC)
+                      "Tmin",  # Min. temp. (degC)
+                      "VPD")))) %>%   # Vap Pres Def (Pa)
+    # Processing data given start and ending dates:
+    dplyr::mutate(Weather = purrr::pmap(list(sta = Start - dpp, end = End, data = Weather), # Requested period
+                                        function(sta, end, data) {
+                                          dplyr::filter(data, Date >= sta & Date <= end) 
+                                          })) %>% 
+    tidyr::unnest(cols = c(Weather)) %>% 
+    
+    # Converting units or adding variables:
+    dplyr::mutate(Rad = Rad*0.000001*DL, # Radiation (W/m2 to MJ/m2)
+                  Tmean = (Tmax+Tmin)/2, # Mean temperature (degC),
+                  VPD = VPD / 1000, # VPD (Pa to kPa),
+                  # Creating variables for ET0 estimation:
+                  lat_rad = latitude*0.0174533,
+                  dr = 1 + 0.033*cos((2*pi/365)*DOY),
+                  Sd = 0.409*sin((2*pi/365)*DOY - 1.39),
+                  ws = acos(-tan(lat_rad)*tan(Sd)),
+                  Ra = (24*60)/(pi) * Gsc * dr * (ws*sin(lat_rad)*sin(Sd) + cos(lat_rad)*sin(ws)),
+                  ET0_HS = 0.0135 * kRs * (Ra / 2.45) * (sqrt(Tmax-Tmin)) * (Tmean + 17.8),
+                  DL = (DL/60)/60 # Day length (hours)
+                  ) %>% 
+    dplyr::select(-lat_rad, -dr, -Sd, -ws, -Ra)
+  
+}
+```
+
+### Run "weather.daymet"
+```{r Run-DAYMET-function}
+# Specify input = dataframe containing sites-data 
+# Specify Days prior planting. Default is dpp = 0. Here we use dpp = 30.
+
+df.weather.daymet <- weather.daymet(input = df.input, dpp = 30)
+
+# Overview of the variables (useful checking for missing values):
+skimr::skim(df.weather.daymet)
+
+# Exporting data as a .csv file
+# write.csv(df.weather.daymet, row.names = FALSE, na = '', file = paste0(path, 'Output_daymet.csv'))
+
+#View(df.weather.daymet)
+
+```
+
+
+\newpage
+
+## NASA-POWER function
+
+Here we download the daily-weather data from the NASA-POWER database, and we process it to obtain common variables of agronomic value. Finally, we produce a data frame with the requested variables for the specified time period. Check the Tutorial file for the specifics of the formulas.
+<br/>
+
+Nasapower has recently modified names for many variables. Thus adjustments have been made to this code. We recommend to 
+<br/>
+
+```{r Explore NASA-POWER variable names}
+# First, you may verify the parameters that can be requested
+
+# All parameters in the "ag" community for the "daily" temporal API.
+# This is what we use here.
+np.vars <- nasapower::query_parameters(community = "ag", temporal_api = "daily")
+# It is a large list (112), so have to parse it carefully, understand each variable that you intend to use...
+names(np.vars)
+purrr::map(.x = c("units", "name", "definition"), 
+           ~ purrr::pluck(np.vars, "SG_DAY_HOURS", .x))
+
+```
+
+
+```{r NASA-POWER-function}
+
+# DS: the temporal_average argument in get_power has been deprecated. Use temporal_api as per the documentation
+weather.nasapower <- function(input, dpp = 0) {
+  # Downloads the daily weather data from the NASA-POWER database and process it 
+  #  input = input file containing the locations and the start & end dates for the time series
+  #  dpp = days prior to the Start
+  input %>%
+    # Retrieving the data from nasapower:
+  dplyr::mutate(
+    Weather = purrr::pmap(list(lat = latitude,
+                               lon = longitude,
+                               sta = Start - dpp,
+                               end = End),
+                          # Specifying the function:
+                          function(lat, lon, sta, end) {
+                            nasapower::get_power(community = "AG",
+                                                 temporal_api = "daily",
+                                                 dates = c(sta, end),
+                                                 lonlat = c(lon, lat),
+                                                 # Variables (see package documents):
+                                                 pars = c("T2M_MIN", # Min. temp. (degC)
+                                                          "T2M_MAX", # Max temp. (degC)
+                                                          "RH2M", # Relative Humidity 2M
+                                                          # DS: Original file had PRECTOT; there is no such variable
+                                                          "PRECTOTCORR", # Precipitation (mm)
+                                                          "SG_DAY_HOURS", # Day length (hours)
+                                                          "ALLSKY_SFC_SW_DWN" # Radiation (MJ/m2)
+                                                          
+                                                 ) ) } ) ) %>% 
+    
+    # Organizing dataframe (Re-arranging rows and columns):
+    dplyr::mutate(Weather = Weather %>% 
+                    # get_power returns a list object, so convert to a data frame:
+                    purrr::map(~ as.data.frame(.)) %>%
+                    # Adjusting dates format:
+                    purrr::map(~ mutate(., yday = lubridate::yday(YYYYMMDD),
+                                        Year = lubridate::year(YYYYMMDD),
+                                        Month = lubridate::month(YYYYMMDD),
+                                        Day = lubridate::mday(YYYYMMDD))) %>%
+                    # Selecting variables of interest:
+                    purrr::map(~ dplyr::select(., yday, Year, Month, Day, YYYYMMDD, 
+                                               T2M_MIN, T2M_MAX, RH2M, PRECTOTCORR, SG_DAY_HOURS, ALLSKY_SFC_SW_DWN)) %>% 
+                    # Renaming variables:
+                    purrr::map(~ rename_with(., ~c("DOY", # Day of the Year
+                                                   "Year", # Year
+                                                   "Month", # Month 
+                                                   "Day", # Day of the month
+                                                   "Date", # Date
+                                                   "Tmin", # Min. temp. (degC)
+                                                   "Tmax", # Max. temp. (degC)
+                                                   "RH", # Relative Humidity (%)
+                                                   "PP", # Precipitation (mm)
+                                                   "DL", # Day length (hours)
+                                                   "Rad" # Radiation (MJ/m2)
+                                                   )))) %>% 
+    
+    tidyr::unnest(cols = c(Weather)) %>% 
+    dplyr::ungroup() %>% 
+    # Converting units or adding variables:
+    dplyr::mutate(Tmean = (Tmax + Tmin)/2, # Mean temp. (degC)
+                  # Nasapower does not provide VPD values
+                  # However, it is possible to estimate it with Temp and RH.
+                  es = 0.6108 * exp((17.27*Tmean) / (Tmean + 237.3)),
+                  ea = es * (RH / 100),
+                  # vapor Pressure deficit (kPa):
+                  VPD = es - ea,
+                  # Creating variables for ET0 estimation:
+                  lat_rad = latitude*0.0174533,
+                  dr = 1 + 0.033*cos((2*pi/365)*DOY),
+                  Sd = 0.409*sin((2*pi/365)*DOY - 1.39),
+                  ws = acos(-tan(lat_rad)*tan(Sd)),
+                  Ra = (24*60)/(pi) * Gsc * dr * (ws*sin(lat_rad)*sin(Sd) + cos(lat_rad)*sin(ws)),
+                  ET0_HS = 0.0135 * kRs * (Ra / 2.45) * (sqrt(Tmax-Tmin)) * (Tmean + 17.8)) %>%
+    # remove the intermediate variables:
+    dplyr::select(-es, -ea, -lat_rad, -dr, -Sd, -ws, -Ra)
+}
+```
+
+### Run "weather.nasapower"
+```{r Run-NASAPOWER-function}
+# Specify input = dataframe containing sites-data 
+# Specify Days prior planting. Default is dpp = 0. Here we use dpp = 30.
+
+df.weather.nasapower <- weather.nasapower(input = df.input, dpp = 30)
+
+# Skim data
+skimr::skim(df.weather.nasapower)
+
+# Exporting data as a .csv file
+# write.csv(df.weather.nasapower, row.names = FALSE, na = '', file = paste0(path, 'Output_nasapower.csv'))
+
+# View(df.weather.nasapower)
+```
+
+\newpage
+
+## CHIRPS function
+
+Here we download the daily-weather data from the CHIRPS database, and we process it to obtain common variables of agronomic value.
+```{r CHIRPS-function}
+weather.chirps <- function(input, dpp = 0){
+  # Downloads the daily-weather data from the CHIRPS database and process it
+  # Args:
+  #  input = input file containing the locations and the start & end dates for the time series
+  #  dpp = days prior to the Start
+  input %>%
+    # Retrieving the data from CHIRPS:
+    dplyr::mutate(Weather = purrr::pmap(
+      list(lat = latitude,
+           lon = longitude,
+           sta = Start - dpp,
+           end = End),
+      # Defining the function:
+      function(lat, lon, sta, end) {
+        get_chirps(data.frame(lon = c(lon), lat = c(lat)), c(as.character(sta), as.character(end)))}),
+      
+      # Get prec. indices:
+      Indices = Weather %>%
+        # Compute precipitation indices over a time series:
+        # NOTE: DEFAULT PRODUCED BY CHIRPS. Be sure to understand the output, because the summaries are done over every x rows specified by the intervals argument. So, will have to do some pre-processing to extract the variables
+        purrr::map(~ precip_indices(., timeseries = TRUE, intervals = 10))) %>% 
+    
+    # Organizing data frame (Re-arranging rows and columns):
+    dplyr::mutate(Weather = Weather %>%
+                    # For loops operations:
+                    purrr::map(~ as.data.frame(.)) %>% 
+                    purrr::map(~ dplyr::select(., date, chirps)) %>%
+                    # Adjusting dates format:
+                    purrr::map(~ mutate(., 
+                                        yday = lubridate::yday(date),
+                                        Year = year(date),
+                                        Month = month(date),
+                                        Day = mday(date))) %>% 
+                    purrr::map(~ dplyr::select(., yday, Year, Month, Day, date, chirps)) %>%
+                    # NOTE: rename_all() has been superseded by rename_with():
+                    purrr::map(~ rename_with(., ~c("DOY", "Year", "Month", "Day","Date", "PP"))),
+                  # Obtaining Precipitation indices (there are 10 of them):
+                  # Check CHIRPS documentation for further details
+                  Indices = Indices %>% 
+                    purrr::map(~ as.data.frame(.)) %>% 
+                    # NOTE: spread has been superseded. Use pivot_wider:
+                    purrr::map(~ tidyr::pivot_wider(., names_from = index, values_from = value)) %>%
+                    purrr::map(~ dplyr::select(., -id, -lon, -lat)) %>% 
+                    purrr::map(~ rename(., Date = date))) %>% 
+    # Now join the Weather and Indices data:
+    dplyr::mutate(Full = purrr::map2(.x = Weather, .y = Indices, ~ dplyr::left_join(.x, .y, by = "Date"))) %>%
+    # Only need Full at this point:
+    dplyr::select(-Weather, -Indices) %>% 
+    tidyr::unnest(cols = c(Full))
+  }
+```
+
+### Run "weather.chirps"
+```{r Run-CHIRPS-function}
+# Specify input = data frame containing sites-data 
+# Specify Days prior planting. Default is dpp = 0. Here we use dpp = 30.
+df.weather.chirps <- weather.chirps(input = df.input, dpp = 30)
+
+# Skim data
+skimr::skim(df.weather.chirps)
+
+# Exporting data as a .csv file
+# write.csv(df.weather.chirps, row.names = FALSE, na = '', file = paste0(path, 'Output_chirps.csv'))
+
+#View(df.weather.chirps)
+```
+
+
+\newpage
+
+# TIME INTERVALS
+
+In this section we create time intervals during the cropping season using pre-specified dates as columns at the initial data table with site information. <br/>
+
+The user can apply: i) a unique seasonal interval (season), ii) even intervals (even), or iii) customized intervals (custom). <br/>
+
+## FULL SEASON interval
+```{r Create-season-intervals}
+# Defining season-intervals
+season <- 
+   df.input %>% 
+   # Create new data:
+   dplyr::mutate(Intervals = 
+                   purrr::map2(.x = Start, .y = End,
+                               ~ data.frame(
+                                 Interval = c("Season"),
+                                 Start.in = c(.x),
+                                 End.in = c(.y) ) )) %>% 
+   # Selecting columns  
+   dplyr::select(ID, Site, Intervals) %>% 
+   tidyr::unnest(cols = c(Intervals))
+
+# NOTE: an alternative way:
+#season <-
+  #df.input %>%
+  #dplyr::mutate(Interval = "Season") %>%
+  #dplyr::rename(Start.in = Start, End.in = End) %>%
+  #dplyr::select(ID, Site, Interval, Start.in, End.in)
+
+# Creating a table to visualize results
+kable(season) %>% 
+  kable_styling(latex_options = c("striped"), position = "center", font_size = 10)
+```
+
+## EVEN intervals
+``` {r Create-even-intervals}
+# Number of intervals:
+n <- 4 
+# Days prior planting:
+dpp <- 30 
+
+# Defining even-intervals:
+even <- 
+  df.input %>% 
+  # Create new data:
+  dplyr::mutate(Intervals = 
+                  purrr::map2(.x = Start, .y = End,
+                              ~ data.frame(
+                                Interval = c("Prev", LETTERS[1:n + 1]),
+                                Start.in = c(.x - dpp, seq.Date(.x, .y + 1, length.out = n + 1)[1:n]),
+                                End.in = c(.x - 1, seq.Date(.x, .y + 1, length.out = n + 1)[2:(n + 1)]))) ) %>% 
+  # Selecting columns:
+  dplyr::select(ID, Site, Intervals) %>% 
+  tidyr::unnest(cols = c(Intervals))
+
+# Creating a table to visualize results
+kable(even) %>% 
+  kable_styling(latex_options = c("striped"), position = "center", font_size = 10)
+```
+
+## CUSTOM intervals
+``` {r Create-custom-intervals}
+# Counting the number of intervals
+# Number of intervals:
+i <- ncol(df.input[, 6:ncol(df.input)]) 
+
+# Already have df.input set up, so this block is not needed:
+######
+df.input <- 
+  df.input %>% 
+  # Reformat Reference dates for operations
+  # Modify names and Number of dates as needed
+  # Here we follow the example of df.input
+  # with 4 dates named as Start (Plant), Flo, SeFi, & End
+  # NOTE: mutate_at has been superseded. Changed for dplyr::across()...
+  dplyr::mutate(across(6:ncol(.), ~str_replace_all(as.character(.), '-','_'))) %>%
+  dplyr::mutate(across(6:ncol(.), ~as.Date(., format='%Y_%m_%d'))) %>%
+  data.frame()
+######
+  
+
+# Defining custom-intervals
+custom <- 
+  df.input %>% 
+  dplyr::mutate(Intervals = # Create
+                  purrr::pmap(list(
+                    x = Start - dpp,
+                    y = Start,
+                    z = Flo,
+                    m = SeFi,
+                    k = End),
+                    function(x, y, z, m, k) {
+                      data.frame(# New data
+                        Interval = c(LETTERS[1:i]),
+                        Name = c("Prev", "Plant-Flo", "Flo-SeFi", "SeFi-End"),
+                        Start.in = c(x, y, z, m),
+                        End.in = c(y-1, z-1, m-1, k))}
+                    )) %>% 
+  # Selecting columns:
+  dplyr::select(ID,, Site, Intervals) %>% 
+  tidyr::unnest(cols = c(Intervals))
+
+# Creating a table to visualize results:
+kable(custom) %>% 
+  kable_styling(latex_options = c("striped"), position = "center", font_size = 10)
+```
+
+
+\newpage
+
+# SEASONAL SUMMARIES
+
+For each of the period or interval of interest a variety of variables can be created. Here, we present a set of variables that can capture environmental variations that might be missing by analyzing standard weather data (precipitations, temperature, radiation). These variables represent an example that was used for studying influence of weather in corn yields by Correndo et al. (2021). Check Table 2 of Tutorial file. <br/>
+
+\newpage
+
+## Summary function - DAYMET & NASA-POWER
+```{r DAYMET-and-NASA-POWER-Seasonal-Summary-Function}
+# Defining the function to summarize DAYMET and/or NASA-POWER
+summary.daymet.nasapower <- function(input, intervals) {
+  # Creates summaries of the DAYMET or NASAPOWER daily data over the requested interval
+  # Args:
+  #  input = a weather data object such as df.weather.daymet with the daily weather data
+  #  intervals = a tibble with the start and end date for the summary period
+  intervals %>%
+    # NOTE: mergeing on ID only as the key, so remove Site:
+    dplyr::select(-Site) %>%
+    # Merging weather data:
+    dplyr::left_join(input %>%
+                     # Nesting weather data back for each site-ID:
+                     dplyr::select_if(names(.) %in% c("ID", "Crop", "Site", "Date","DL", "PP", 
+                                                      "Rad", "Tmax", "Tmin", "Tmean", "VPD", "ET0_HS")) %>%
+                     dplyr::group_by(ID, Crop, Site) %>% 
+                     # .key is deprecated
+                     # (https://stackoverflow.com/questions/62637241/nest-key-in-dplyr-deprecated-what-to-use-instead)
+                     tidyr::nest(Weather = -c(ID, Crop, Site)) %>%
+                     dplyr::ungroup(), 
+                   by = c("ID")) %>% 
+    
+    # NOTE: CAUTION. Here you are filtering the weather data to the interval specified in the intervals argument object. Therefore, need to make sure that the input weather is a LONGER time series that specified in intervals. Otherwise, you may think you are summarizing weather over an interval, but there will be days missing. The code below will not throw an error to alert you to this, so may have to revise to do so using one of the error catching/warning functions
+    dplyr::mutate(Weather = purrr::pmap(
+      list(x = Start.in,
+           y = End.in, 
+           data = Weather),
+      function(x, y, data) {
+        dplyr::filter(data, Date >= x & Date < y)} ) ) %>% 
+    
+    # NOTE: Calculation of variables that summarize the intervals (agronomic-specific; see Table 2 in the tutorial)
+    dplyr::mutate(Weather = Weather %>% 
+                    # User must adapt depending on the crop (these ay be corn-specific)
+                    purrr::map(~ mutate(.,
+                                        # Extreme Prec. event:
+                                        EPEi = case_when(PP > 25 ~1, TRUE ~ 0),
+                                        # Extreme Temp. event:
+                                        ETEi = case_when(Tmax >= 30 ~1, TRUE ~ 0), 
+                                        # Tmax factor,  crop heat units (CHU):
+                                        Ymax = case_when(Tmax < 10 ~ 0, TRUE ~ 3.33*(Tmax-10) - 0.084*(Tmax-10)),
+                                        # Tmin factor, Crop heat units (CHU):
+                                        Ymin = case_when(Tmin < 4.44 ~ 0, TRUE ~ 1.8*(Tmin-4.44)), 
+                                        # Daily CHU:
+                                        Yavg = (Ymax + Ymin)/2,
+                                        # Tmin threshold Growing Degrees:
+                                        Gmin = case_when(Tmin >= 10 ~ Tmin, TRUE ~ 10),
+                                        # Tmax threshold Growing Degrees:
+                                        Gmax = case_when(Tmax <= 30 ~ Tmax, TRUE ~ 30),
+                                        # Daily Growing Degree Units:
+                                        GDU = ((Gmin + Gmax)/2) - 10) ) ) %>% 
+    
+    # Summary for each variable:
+    dplyr::mutate(
+      # Duration of interval (days):
+      Dur = Weather %>% purrr::map(~nrow(.)),
+      # Accumulated PP (mm):
+      PP = Weather %>% purrr::map(~sum(.$PP)),
+      # Mean Temp (C):
+      Tmean = Weather %>% purrr::map(~mean(.$Tmean)),
+      # Accumulated Rad (MJ/m2):
+      Rad = Weather %>% purrr::map(~sum(.$Rad)),
+      # Accumulated VPD (kPa):
+      VPD = Weather %>% purrr::map(~sum(.$VPD)),
+      # Accumulated ET0 (mm):
+      ET0_HS = Weather %>% purrr::map(~sum(.$ET0_HS)),
+      # Number of ETE (#):
+      ETE = Weather %>% purrr::map(~sum(.$ETEi)),
+      # Number of EPE (#):
+      EPE = Weather %>% purrr::map(~sum(.$EPEi)),
+      # Accumulated Crop Heat Units (CHU):
+      CHU = Weather %>% purrr::map(~sum(.$Yavg)),
+      # Shannon Diversity Index for PP:
+      SDI = Weather %>% purrr::map(~ vegan::diversity(.$PP, index = "shannon")/log(length(.$PP))),
+      # Accumulated Growing Degree Days (GDD):
+      GDD =  Weather %>% purrr::map(~sum(.$GDU))) %>% 
+    
+    # Additional indices and final units:
+    dplyr::select(-Weather) %>% 
+    # DS: `cols` is now required when using unnest()
+    tidyr::unnest(cols = c(Dur, PP, Tmean, Rad, VPD, ET0_HS, ETE, EPE, CHU, SDI, GDD)) %>% 
+    dplyr::mutate(
+      # Photo-thermal quotient (Q):
+      Q_chu = Rad/CHU,
+      Q_gdd = Rad/GDD,
+      # Abundant and Well Distributed Water:
+      AWDR = PP*SDI) 
+  }
+```
+
+\newpage
+
+## Summary function - CHIRPS. <br/>
+``` {r CHIRPS-Seasonal-Summary-Function}
+# Defining function to summarize CHIRPS data
+summary.chirps <- function(input, intervals) {
+  # Creates summaries of the CHIRPS daily data over the requested interval
+  # Args:
+  #  input = a weather data object with the CHIRPS daily weather data
+  #  intervals = a tibble with the start and end date for the summary period 
+  # Returns:
+  #  a tibble with the summary variables over the requested interval
+  #
+  intervals %>%
+    # DS: going to merge on ID only as the key, so remove Site:
+  dplyr::select(-Site) %>%
+    # Merging of the weather data:
+    dplyr::left_join(input %>% 
+                       # Nesting weather data back for each site-ID:
+                       dplyr::select(c(ID, Crop, Site, Date, PP)) %>% 
+                       dplyr::group_by(ID, Crop, Site) %>% 
+                       # nest(.key = 'Weather') %>% 
+                       tidyr::nest(Weather = -c(ID, Crop, Site)) %>%
+                       ungroup(), 
+                     by = c("ID")) %>% 
+    
+    dplyr::mutate(Weather = purrr::pmap(list(
+      x = Start.in,
+      y = End.in, 
+      data = Weather),
+      function(x, y, data) {
+        # DS: again, as noted above, the time series supplied to the input argument MUST be longer that the intervals supplied in the object passed to the intervals argument
+        dplyr::filter(data, Date >= x & Date < y)} ) ) %>% 
+    dplyr::mutate(Weather = Weather %>% 
+                    # User must adapt depending on the crop.
+                    # Ext. Prec. event:
+                    purrr::map(~ dplyr::mutate(., EPEi = case_when(PP > 25 ~ 1, TRUE ~ 0)))) %>%
+    
+    # Summary for each variable:
+    dplyr::mutate(
+      # Duration of interval (days):
+      Dur = Weather %>% purrr::map(~nrow(.)),
+      # Accumulated PP (mm):
+      PP = Weather %>% purrr::map(~sum(.$PP)),
+      # Number of EPE (#):
+      EPE = Weather %>% purrr::map(~sum(.$EPEi)),
+      # Shannon Diversity Index for precipitation data:
+      SDI = Weather %>% purrr::map(~ vegan::diversity(.$PP, index = "shannon")/log(length(.$PP)))) %>% 
+    
+    # Additional indices and final units:
+    dplyr::select(-Weather) %>%
+    # `cols` is now required when using unnest()
+    tidyr::unnest(cols = c(Dur, PP, EPE, SDI)) %>% 
+    # Abundant and Well Distributed Water:
+    dplyr::mutate(AWDR = PP*SDI) 
+  }
+```
+
+\newpage
+
+## DAYMET summary
+```{r DAYMET-summary}
+# Run the summary
+# input = dataframe containing the data (from daymet or nasapower).
+# intervals = type of intervals (season, custom or even)
+
+df.summary.daymet <-
+  summary.daymet.nasapower(input = df.weather.daymet,
+                           intervals = custom)
+
+# Skim data
+skimr::skim(df.summary.daymet)
+
+# Creating a table to visualize results
+kbl(df.summary.daymet) %>%
+  kable_styling(font_size = 7, position = "center", latex_options = c("scale_down"))
+
+
+# Exporting data as a .csv file
+# Daymet
+# write.csv(df.summary.daymet, row.names = FALSE, na = '', file = paste0(path, 'Summary_daymet.csv'))
+```
+
+\newpage
+
+## NASA-POWER summary
+```{r NASA-POWER-summary}
+
+# Run the summary
+# data = dataframe containing the data (from daymet or nasapower).
+# intervals = type of intervals (season, custom or even)
+
+df.summary.nasapower <-
+  summary.daymet.nasapower(input = df.weather.nasapower,
+                           intervals = custom)
+
+# Skim data
+skimr::skim(df.summary.nasapower)
+
+# Creating a table to visualize results
+kbl(df.summary.nasapower) %>%
+  kable_styling(font_size = 7, position = "center", latex_options = c("scale_down"))
+
+# Exporting data as a .csv file
+# write.csv(df.summary.nasapower, row.names = FALSE, na = '', file = paste0(path, 'Summary_nasapower.csv')) 
+```
+
+\newpage
+
+## CHIRPS summary
+```{r CHIRPS-summary}
+# Run the summary
+# data = dataframe containing the data.
+# intervals = type of intervals (season, custom or even)
+
+df.summary.chirps <-
+  summary.chirps(input = df.weather.chirps,
+                 intervals = custom)
+
+skim(df.summary.chirps)
+
+# Creating a table to visualize results
+kbl(df.summary.chirps) %>%
+  kable_styling(font_size = 7, position = "center", latex_options = c("scale_down"))
+
+# Exporting data as a .csv file
+# write.csv(df.summary.chirps, row.names = FALSE, na = '', file = paste0(path, 'Summary_chirps.csv')) 
+```
+
+\newpage
+
+# HISTORICAL WEATHER
+
+## Historical "weather.daymet"
+
+For retrieving historical weather, user must specify the input containing the historical target dates by site.
+```{r Get-Historical-weather-daymet"}
+# Specify input = dataframe containing historical dates from sites 
+
+hist.weather.daymet <- weather.daymet(input = df.historical)
+
+# This is a large data frame (21900 obs), so good to have an overview
+# Skim data
+skimr::skim(hist.weather.daymet)
+
+# Exporting data as a .csv file
+# write.csv(hist.weather.daymet, row.names = FALSE, na = '', file = paste0(path, 'Hist_output_daymet.csv'))
+
+#View(hist.weather.daymet)
+```
+
+## Historical "weather.nasapower"
+
+```{r Get-Historical-weather-nasapower}
+# Specify input = dataframe containing historical dates from sites 
+
+hist.weather.nasapower <- weather.nasapower(input = df.historical)
+
+skim(hist.weather.nasapower)
+
+# Exporting data as a .csv file
+# write.csv(hist.weather.nasapower, row.names = FALSE, na = '', file = paste0(path, 'Hist_output_nasapower.csv'))
+
+# View(hist.weather.nasapower)
+```
+
+## Historical "weather.chirps"
+
+```{r Get-Historical-weather-chirps}
+# Specify input = dataframe containing historical dates from sites 
+
+hist.weather.chirps <- weather.chirps(input = df.historical)
+
+# Skim data
+skimr::skim(hist.weather.chirps)
+
+# Exporting data as a .csv file
+# write.csv(hist.weather.chirps, row.names = FALSE, na = '', file = paste0(path, 'Hist_output_chirps.csv'))
+
+#View(hist.weather.chirps)
+```
+
+
+## Intervals functions
+
+```{r Intervals-functions}
+# Defining function to summarize historical weather (years)
+
+# NOTE: This new function returns columns in line with the structure of the custom, even and season objects. The object returned by the function will include Site (as do the custom, even and season objects). This provides for consistency in calling the summary.daymet.nasapower function, which does the left join in ID; and avoids any warnings or attempts to merge by other matching columns.
+
+# Revised function:
+historical.years <- function(hist.data) {
+  # Creates an input tibble with the start and end date for each year a summary is desired
+  # Args:
+  #  hist.data = data frame containing the historical weather data to summarize (must be complete years)
+  # Returns:
+  #  a tibble of monthly summaries for each ID
+  #
+  # By year:
+  hist.data %>% 
+    dplyr::group_by(ID, Crop, Site) %>%
+    tidyr::nest() %>%
+    dplyr::mutate(the_Dates = purrr::map(data, function(.data) {.data %>% dplyr::group_by(Year) %>% 
+        dplyr::summarise(Start.in = min(Date), End.in = max(Date), .groups = "drop")})) %>%
+    dplyr::ungroup() %>%
+    dplyr::select(ID, Site, the_Dates) %>%
+    tidyr::unnest(cols = c(the_Dates))
+}
+
+# Defining function to summarize historical weather (years & months)
+# Revised function:
+historical.years.months <- function(hist.data) {
+  # Creates an input tibble with the start and end date for each year & month a summary is desired (monthly summaries)
+  # Args:
+  #  hist.data = data frame containing the historical weather data to summarize (must be complete years)
+  # Returns:
+  #  a tibble of monthly summaries for each ID
+  #
+  # By month in year:
+  hist.data %>% 
+    dplyr::group_by(ID, Crop, Site) %>%
+    tidyr::nest() %>%
+    dplyr::mutate(the_Dates = purrr::map(data, function(.data) {.data %>% dplyr::group_by(Year, Month) %>% 
+        dplyr::summarise(Start.in = min(Date), End.in = max(Date), .groups = "drop")})) %>%
+    dplyr::ungroup() %>%
+    dplyr::select(ID, Site, the_Dates) %>%
+    tidyr::unnest(cols = c(the_Dates))
+}
+```
+
+
+## DAYMET Historical summary
+
+Summary can be obtained by years or by years.months. User must specify this option at the "intervals" argument of the summary function.  <br/>
+
+### Intervals
+```{r DAYMET-Historical-Intervals}
+# Specify hist.data = dataframe containing the historical weather data to summarize
+years <- historical.years(hist.data = hist.weather.daymet)
+
+# Specify hist.data = dataframe containing the historical weather data to summarize
+years.months <- historical.years.months(hist.data = hist.weather.daymet)
+```
+
+### Summary
+
+```{r DAYMET-Historical-Summary}
+# input = dataframe containing the historical weather data.
+# intervals = type of historical intervals (years, years.months)
+
+# Summarizing historical weather
+historical.summary.daymet <-
+  summary.daymet.nasapower(input = hist.weather.daymet,
+                           intervals = years)
+
+# By month...
+# historical.summary.daymet.months <-
+#   summary.daymet.nasapower(input = hist.weather.daymet,
+#                            intervals = years.months)
+
+# Creating a table to visualize data
+kbl(historical.summary.daymet) %>%
+  kable_styling(font_size = 7, position = "center", latex_options = c("scale_down"))
+
+# Exporting data as a .csv file
+# Daymet
+# write.csv(historical.summary.daymet, row.names = FALSE, na = '', file = paste0(path, 'Historical_summary_daymet.csv'))
+```
+
+
+## NASA-POWER Historical summary
+
+Summary can be obtained by years or by years.months. User must specify this option at the "intervals" argument of the summary function. <br/>
+
+### Intervals
+
+```{r NASA-POWER-Historical-Intervals}
+
+# Specify hist.data = dataframe containing the historical weather data to summarize
+
+years <- historical.years(hist.data = hist.weather.nasapower)
+
+# Specify hist.data = dataframe containing the historical weather data to summarize
+years.months <- historical.years.months(hist.data = hist.weather.nasapower)
+```
+
+### Summary
+```{r NASA-POWER-Historical-Summary}
+# input = dataframe containing the historical weather data.
+# intervals = type of historical intervals (years, years.months)
+
+# Summarizing historical weather
+historical.summary.nasapower <-
+  summary.daymet.nasapower(input = hist.weather.nasapower,
+                           intervals = years)
+
+# Creating a table to visualize the data
+kbl(historical.summary.nasapower) %>%
+  kable_styling(font_size = 7, position = "center", latex_options = c("scale_down"))
+
+
+# Exporting data as a .csv file:
+# write.csv(historical.summary.nasapower, row.names = FALSE, na = '',
+#           file = paste0(path, 'Historical_summary_nasapower.csv'))
+```
+
+
+## CHIRPS Historical summary
+Summary can be obtained by years or by years.months. User must specify this option at the "intervals" argument of the summary function. <br/>
+
+### Intervals
+```{r CHIRPS-Historical-Intervals}
+# Specify hist.data = dataframe containing the historical weather data to summarize
+
+years <- historical.years(hist.data = hist.weather.chirps)
+
+# Specify hist.data = dataframe containing the historical weather data to summarize
+years.months <- historical.years.months(hist.data = hist.weather.chirps)
+```
+
+### Summary
+```{r CHIRPS-Historical-Summary}
+# input = dataframe containing the historical weather data.
+# intervals = type of historical intervals (years, years.months)
+
+# Summarizing historical weather
+historical.summary.chirps <- summary.chirps(input = hist.weather.chirps, intervals = years)
+
+# Creating a table to visualize the data
+kbl(historical.summary.chirps) %>%
+  kable_styling(font_size = 7, position = "center", latex_options = c("scale_down"))
+
+
+# Exporting data as a .csv file
+# Daymet
+# write.csv(historical.summary.chirps, row.names = FALSE, na = '',
+#           file = paste0(path, 'Historical_summary_chirps.csv'))
+```
+
+\newpage
+
+# REFERENCES
+
+Allen, R.G., L.S. Pereira, D. Raes, M. Smith. 1998. Crop evapotranspiration - Guidelines for computing crop water requirements. *FAO Irrigation and drainage*, 56. FAO - Food and Agriculture Organization of the United Nations. Rome, Italy. ISBN 92-5-104219-5. http://www.fao.org/3/x0490e/x0490e00.htm#Contents
+
+Bannayan, M., Hoogenboom, G., & Crout, N.M.J., 2004. Photothermal impact on maize performance: a simulation approach. *Ecol. Modell.*, 180 (2-3), 277-290. https://doi.org/10.1016/j.ecolmodel.2004.04.022 <br/>
+
+Bootsma, A., S. Gameda, & D.W. McKenney. 2005. Potential impacts of cli-
+mate change on corn, soybeans and barley yields in Atlantic Canada. *Can J. Soil Sci.* 85:345–357. https://doi.org/10.4141/S04-025 <br/>
+
+Butler, E.E., & Huybers, P. 2013. Adaptation of US maize to temperature variations. *Nat. Clim. Chang*. 3N, 68–72. https://doi.org/10.1038/nclimate1585 <br/>
+
+Cobaner M., H. Citakoğlu, T. Haktanir, & O. Kisi. 2017. Modifying Hargreaves–Samani equation with meteorological variables for estimation of reference evapotranspiration in Turkey. *Hydrol. Res.* 1 April 2017, 48 (2), 480–497. https://doi.org/10.2166/nh.2016.217 <br/>
+
+Correndo, A.A., J.L. Rotundo, N. Tremblay, S. Archontoulis, J.A. Coulter, D. Ruiz-Diaz, D. Franzen, A.J. Franzluebbers, E. Nafziger, R. Schwalbert, K. Steinke, J. Williams, C.D. Messina, & I.A. Ciampitti. 2021. Assessing the uncertainty of maize yield without nitrogen fertilization. *Field Crops Res.* 260, 2021, 107985. https://doi.org/10.1016/j.fcr.2020.107985. <br/>
+
+Funk C., P. Peterson, M. Landsfeld, D. Pedreros, J. Verdin, S. Shukla, & J. Michaelsen. 2015. The climate hazards infrared precipitation with stations—a new environmental record for monitoring extremes. *Scientific Data* 2, 150066. https://doi.org/10.1038/sdata.2015.66. <br/>
+
+Gilmore, E.C., & Rogers, J.S. 1958. Heat units as a method of measuring maturity in corn. *Agron. J.* 50:611–615. https://doi.org/10.2134/agronj1958.00021962005000100014x <br/>
+
+Hargreaves,G.H., & Z.A. Samani. 1985. Reference crop evapotranspiration from temperature. *Appl. Eng. Agric.* 1(2),96–99. https://doi.org/10.13031/2013.26773 <br/>
+
+Raziei, T., & L.S. Pereira. 2013. Estimation of ET0 with Hargreaves–Samani and FAO-PM temperature methods for a wide range of climates in Iran. *Agric. Water Manag.* 121 (2013), 1-18. https://doi.org/10.1016/j.agwat.2012.12.019 <br/>
+
+Sparks, A. 2018. nasapower: A NASA POWER Global Meteorology, Surface Solar ENergy and Climatology Data Client for R. *J. of Open Source Softw.*, 3(30), 1035. https://doi.org/10.21105/joss.01035 <br/>
+
+Thornton, P.E., M. Thornton, B. Mayer, Y. Wei, R. Devarakonda, R. Vose, & R.B. Cook.  2019. Daymet: daily surface weather data on a 1-km Grid for North America, Version3. ORNL DAAC, Oak Ridge, Tennessee, USA. https://daymet.ornl.gov/ <br/>
+
+Tremblay, N., Bouroubi, Y.M., Bélec, C., Mullen, R.W., Kitchen, N.R., Thomason, W.E., Ebelhar, S., Mengel, D.B., Raun, W.R., Francis, D.D., Vories, E.D., & Ortiz‐Monasterio, I., 2012. Corn response to nitrogen is influenced by soil texture and weather. *Agron. J.*, 104,  1658-1671. https://doi.org/10.2134/agronj2012.0184 <br/>
+
+Ye, Q., Lin, X., Adee, E., Min, D., Assefa Mulisa, Y., O'Brien, D., & Ciampitti, I.A., 2017. Evaluation of climatic variables as yield‐limiting factors for maize in Kansas. *Int. J. Climatol.* 37.S1,  464-75. https://doi.org/10.1002/joc.5015 <br/>
