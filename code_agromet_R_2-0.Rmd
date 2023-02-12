@@ -260,7 +260,12 @@ weather.daymet <- function(input, dpp = 0){
                   ws = acos(-tan(lat_rad)*tan(Sd)),
                   Ra = (24*60)/(pi) * Gsc * dr * (ws*sin(lat_rad)*sin(Sd) + cos(lat_rad)*sin(ws)),
                   ET0_HS = 0.0135 * kRs * (Ra / 2.45) * (sqrt(Tmax-Tmin)) * (Tmean + 17.8),
-                  DL = (DL/60)/60 # Day length (hours)
+                  # Extreme PP events
+                  EPE_i = case_when((PP > 25) ~ 1, TRUE ~ 0),
+                  # Extreme Temp events
+                  ETE_i = case_when((Tmax >= 30) ~ 1, TRUE ~ 0),
+                  # Day length (hours)
+                  DL = (DL/60)/60 
                   ) %>% 
     dplyr::select(-lat_rad, -dr, -Sd, -ws, -Ra)
   
@@ -424,7 +429,9 @@ weather.chirps <- function(input, dpp = 0){
            end = End),
       # Defining the function:
       function(lat, lon, sta, end) {
-        get_chirps(data.frame(lon = c(lon), lat = c(lat)), c(as.character(sta), as.character(end)))}),
+        get_chirps(data.frame(lon = c(lon), lat = c(lat)),
+                   c(as.character(sta), as.character(end)),
+                   server = "CHC")}),
       
       # Get prec. indices:
       Indices = Weather %>%
@@ -475,6 +482,7 @@ skimr::skim(df.weather.chirps)
 # write.csv(df.weather.chirps, row.names = FALSE, na = '', file = paste0(path, 'Output_chirps.csv'))
 
 #View(df.weather.chirps)
+
 ```
 
 
@@ -908,7 +916,8 @@ historical.years.months <- function(hist.data) {
   hist.data %>% 
     dplyr::group_by(ID, Crop, Site) %>%
     tidyr::nest() %>%
-    dplyr::mutate(the_Dates = purrr::map(data, function(.data) {.data %>% dplyr::group_by(Year, Month) %>% 
+    dplyr::mutate(the_Dates = purrr::map(data, function(.data) {.data %>% 
+        dplyr::group_by(Year, Month) %>% 
         dplyr::summarise(Start.in = min(Date), End.in = max(Date), .groups = "drop")})) %>%
     dplyr::ungroup() %>%
     dplyr::select(ID, Site, the_Dates) %>%
