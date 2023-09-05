@@ -6,14 +6,14 @@ A detailed PDF Tutorial with equations could be found at: https://dataverse.harv
 ## Instructions
 - You will need R (https://cran.r-project.org/) and RStudio (https://posit.co/download/rstudio-desktop/) installed.
 - Clone or download this repository into your computer.
-- Open the AgrometR.Rproj file.
-- Open the code_agromet_R_3-0.Rmd file.
+- Open the `AgrometR.Rproj` file.
+- Open the `code_agromet_R_3-0.Rmd` file.
 - Run the chunks in order.
 
 ## Sources
 
 ### Publication
-https://bmcresnotes.biomedcentral.com/articles/10.1186/s13104-021-05622-8
+Correndo, A.A., Moro Rosso, L.H. & Ciampitti, I.A. Retrieving and processing agro-meteorological data from API-client sources using R software. BMC Res Notes 14, 205 (2021). https://doi.org/10.1186/s13104-021-05622-8
 
 ### Daymet
 https://github.com/bluegreen-labs/daymetr
